@@ -309,6 +309,7 @@
     const [millName, setMillName] = useState("");
     const [mobile, setMobile] = useState("");
     const [address, setAddress] = useState("");
+    const [referralCode, setReferralCode] = useState("");
     const [pin, setPin] = useState("");
     const [error, setError] = useState("");
 
@@ -337,14 +338,26 @@
             setError(t.errInvalidLogin);
             return;
           }
-          onLoginSuccess({ role: "owner", userId: found.id, name: found.name, millName: found.millName || "" });
+          onLoginSuccess({
+            role: "owner",
+            userId: found.id,
+            name: found.name,
+            millName: found.millName || "",
+            referralCode: found.referralCode || ""
+          });
         } else {
           const found = store.clients.find((c) => c.mobile === cleanMobile && c.pin === cleanPin);
           if (!found) {
             setError(t.errInvalidLogin);
             return;
           }
-          onLoginSuccess({ role: "client", userId: found.id, name: found.name, mobile: found.mobile });
+          onLoginSuccess({
+            role: "client",
+            userId: found.id,
+            name: found.name,
+            mobile: found.mobile,
+            ownerId: found.ownerId || ""
+          });
         }
         return;
       }
@@ -366,6 +379,14 @@
           pin: cleanPin
         });
       } else {
+        const cleanCode = referralCode.trim().toUpperCase();
+        const matchedOwner = store.owners.find(
+          (o) => String(o.referralCode || "").toUpperCase() === cleanCode
+        );
+        if (!cleanCode || !matchedOwner) {
+          setError(t.errInvalidReferralCode);
+          return;
+        }
         if (store.clients.some((c) => c.mobile === cleanMobile)) {
           setError(t.errAlreadyRegistered);
           return;
@@ -374,7 +395,8 @@
           name: name.trim(),
           mobile: cleanMobile,
           address: address.trim(),
-          pin: cleanPin
+          pin: cleanPin,
+          ownerId: matchedOwner.id
         });
       }
     };
@@ -432,6 +454,15 @@
                   />
                 </div>
               ` : html`
+                <div className="form-group">
+                  <label className="form-label">${t.referralCodeLabel} *</label>
+                  <input
+                    className="form-control"
+                    value=${referralCode}
+                    onInput=${(e) => setReferralCode(e.target.value.toUpperCase())}
+                    placeholder=${t.referralCodePlaceholder}
+                  />
+                </div>
                 <div className="form-group">
                   <label className="form-label">${t.addressLabel}</label>
                   <input
@@ -543,15 +574,34 @@
     t, session, store, onAddClient, onAddOrder, onToggleOrderStatus, onMarkAllClientPaid,
     onDeleteOrder, onMarkAllNotifsRead
   }) {
+    const myClients = useMemo(
+      () => store.clients.filter((c) => c.ownerId === session.userId),
+      [store.clients, session.userId]
+    );
+    const myOrders = useMemo(
+      () => store.orders.filter((o) => o.ownerId === session.userId),
+      [store.orders, session.userId]
+    );
+    const myNotifications = useMemo(
+      () => store.notifications.filter((n) => n.ownerId === session.userId),
+      [store.notifications, session.userId]
+    );
+    const currentOwner = useMemo(
+      () => store.owners.find((o) => o.id === session.userId),
+      [store.owners, session.userId]
+    );
+    const ownerReferralCode = session.referralCode || currentOwner?.referralCode || "";
+
     const [activeTab, setActiveTab] = useState("overview");
     const [showNotifs, setShowNotifs] = useState(false);
     const [showAddClient, setShowAddClient] = useState(false);
     const [clientSearch, setClientSearch] = useState("");
     const [orderSearch, setOrderSearch] = useState("");
-    const [selectedClientId, setSelectedClientId] = useState(store.clients[0]?.id || "");
+    const [copiedCode, setCopiedCode] = useState(false);
+    const [selectedClientId, setSelectedClientId] = useState(myClients[0]?.id || "");
 
     // New Order Form State
-    const [orderClientId, setOrderClientId] = useState(store.clients[0]?.id || "");
+    const [orderClientId, setOrderClientId] = useState(myClients[0]?.id || "");
     const [orderGrainId, setOrderGrainId] = useState("gehu");
     const [orderKg, setOrderKg] = useState("10");
     const [orderRate, setOrderRate] = useState("5");
@@ -561,22 +611,22 @@
     const [orderSavedMsg, setOrderSavedMsg] = useState("");
 
     useEffect(() => {
-      if (!selectedClientId && store.clients.length > 0) {
-        setSelectedClientId(store.clients[0].id);
+      if (!selectedClientId && myClients.length > 0) {
+        setSelectedClientId(myClients[0].id);
       }
-      if (!orderClientId && store.clients.length > 0) {
-        setOrderClientId(store.clients[0].id);
+      if (!orderClientId && myClients.length > 0) {
+        setOrderClientId(myClients[0].id);
       }
-    }, [store.clients]);
+    }, [myClients]);
 
     const today = todayISO();
-    const unreadCount = store.notifications.filter((n) => !n.read).length;
+    const unreadCount = myNotifications.filter((n) => !n.read).length;
 
     const clientMap = useMemo(() => {
       const m = {};
-      store.clients.forEach((c) => { m[c.id] = c; });
+      myClients.forEach((c) => { m[c.id] = c; });
       return m;
-    }, [store.clients]);
+    }, [myClients]);
 
     const grainMap = useMemo(() => {
       const m = {};
@@ -585,8 +635,8 @@
     }, []);
 
     const sortedOrders = useMemo(
-      () => [...store.orders].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)),
-      [store.orders]
+      () => [...myOrders].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)),
+      [myOrders]
     );
 
     const kpis = useMemo(() => {
@@ -594,7 +644,7 @@
       let todayKg = 0;
       let totalRemaining = 0;
       let totalPaidAll = 0;
-      store.orders.forEach((o) => {
+      myOrders.forEach((o) => {
         if (o.date === today) {
           todayKg += Number(o.kg || 0);
           if (o.status === "paid") todayIncome += Number(o.total || 0);
@@ -604,8 +654,8 @@
       });
       const grandTotal = totalPaidAll + totalRemaining;
       const paidRatioPct = grandTotal > 0 ? Math.round((totalPaidAll / grandTotal) * 100) : 100;
-      return { todayIncome, todayKg, totalRemaining, totalPaidAll, paidRatioPct, clientCount: store.clients.length };
-    }, [store.orders, store.clients, today]);
+      return { todayIncome, todayKg, totalRemaining, totalPaidAll, paidRatioPct, clientCount: myClients.length };
+    }, [myOrders, myClients, today]);
 
     const nextTimeOrders = useMemo(
       () => sortedOrders.filter((o) => o.status === "next_time"),
@@ -618,7 +668,7 @@
       GRAINS.forEach((g) => {
         map[g.id] = { grain: g, revenue: 0, kg: 0, count: 0 };
       });
-      store.orders.forEach((o) => {
+      myOrders.forEach((o) => {
         if (o.date >= cutoff && map[o.grainId]) {
           map[o.grainId].revenue += Number(o.total || 0);
           map[o.grainId].kg += Number(o.kg || 0);
@@ -628,15 +678,15 @@
       const list = Object.values(map);
       const maxRev = Math.max(1, ...list.map((x) => x.revenue));
       return { list, maxRev };
-    }, [store.orders]);
+    }, [myOrders]);
 
     const filteredClients = useMemo(() => {
       const q = clientSearch.trim().toLowerCase();
-      if (!q) return store.clients;
-      return store.clients.filter(
+      if (!q) return myClients;
+      return myClients.filter(
         (c) => c.name.toLowerCase().includes(q) || c.mobile.includes(q)
       );
-    }, [store.clients, clientSearch]);
+    }, [myClients, clientSearch]);
 
     const filteredAllOrders = useMemo(() => {
       const q = orderSearch.trim().toLowerCase();
@@ -685,13 +735,28 @@
     };
 
     const handleExportJson = () => {
-      const blob = new Blob([JSON.stringify(store, null, 2)], { type: "application/json" });
+      const payload = {
+        owners: currentOwner ? [currentOwner] : [],
+        clients: myClients,
+        orders: myOrders,
+        notifications: myNotifications
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = `chakki-backup-${today}.json`;
       a.click();
       URL.revokeObjectURL(url);
+    };
+
+    const handleCopyReferralCode = () => {
+      if (!ownerReferralCode) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(ownerReferralCode).catch(() => {});
+      }
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2200);
     };
 
     const renderOrderActions = (o) => html`
@@ -752,11 +817,11 @@
                 </button>
               ` : null}
             </div>
-            ${store.notifications.length === 0
+            ${myNotifications.length === 0
               ? html`<div className="empty-state">${t.noNotifications}</div>`
               : html`
                 <div className="order-list">
-                  ${store.notifications.map((n) => html`
+                  ${myNotifications.map((n) => html`
                     <div className="order-row" key=${n.id}>
                       <div>
                         <div style=${{ fontWeight: 700 }}>${t.notifRegisteredMsg}: ${n.clientName}</div>
@@ -771,6 +836,16 @@
               `}
           </div>
         ` : null}
+
+        <div className="card-soft" style=${{ marginBottom: "18px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
+          <div>
+            <div style=${{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text-muted)" }}>${t.ownerReferralBannerLabel}</div>
+            <div style=${{ fontSize: "1.25rem", fontWeight: 700, letterSpacing: "0.06em", color: "var(--accent)" }}>${ownerReferralCode}</div>
+          </div>
+          <button type="button" className="btn btn-secondary btn-sm" onClick=${handleCopyReferralCode}>
+            ${copiedCode ? `✓ ${t.copiedCodeMsg}` : `📋 ${t.copyCodeBtn}`}
+          </button>
+        </div>
 
         <div className="kpi-grid">
           <div className="kpi-card">
@@ -812,7 +887,7 @@
             </button>
             <button type="button" className=${`tab-btn ${activeTab === "clients" ? "active" : ""}`} onClick=${() => setActiveTab("clients")}>
               ${t.tabClients}
-              <span className="tab-count">${store.clients.length}</span>
+              <span className="tab-count">${myClients.length}</span>
             </button>
             <button type="button" className=${`tab-btn ${activeTab === "next_time" ? "active" : ""}`} onClick=${() => setActiveTab("next_time")}>
               ${t.tabNextTime}
@@ -863,7 +938,7 @@
                     ${filteredClients.length === 0
                       ? html`<div className="empty-state">${t.noOrdersYet}</div>`
                       : filteredClients.map((c) => {
-                        const due = store.orders
+                        const due = myOrders
                           .filter((o) => o.clientId === c.id && o.status === "next_time")
                           .reduce((sum, o) => sum + Number(o.total || 0), 0);
                         return html`
@@ -1003,7 +1078,7 @@
               <div className="card-soft" style=${{ marginBottom: "20px" }}>
                 <h3 style=${{ marginBottom: "12px" }}>${t.addOrderBtn}</h3>
                 ${orderSavedMsg ? html`<div className="alert alert-success">${orderSavedMsg}</div>` : null}
-                ${store.clients.length === 0 ? html`
+                ${myClients.length === 0 ? html`
                   <div className="alert">
                     ${t.selectClientPrompt}
                     <button type="button" className="btn btn-primary btn-sm" style=${{ marginLeft: "10px" }} onClick=${() => setShowAddClient(true)}>
@@ -1016,7 +1091,7 @@
                       <div className="form-group">
                         <label className="form-label">${t.selectClient}</label>
                         <select className="form-control" value=${orderClientId} onChange=${(e) => setOrderClientId(e.target.value)}>
-                          ${store.clients.map((c) => html`<option key=${c.id} value=${c.id}>${c.name} (${c.mobile})</option>`)}
+                          ${myClients.map((c) => html`<option key=${c.id} value=${c.id}>${c.name} (${c.mobile})</option>`)}
                         </select>
                       </div>
                       <div className="form-group">
@@ -1162,6 +1237,11 @@
       return { paid, remaining, kg };
     }, [myOrders]);
 
+    const linkedOwner = useMemo(
+      () => store.owners.find((o) => o.id === session.ownerId) || null,
+      [store.owners, session.ownerId]
+    );
+
     const visibleOrders = useMemo(() => {
       if (tab === "pending") return myOrders.filter((o) => o.status === "next_time");
       if (tab === "paid") return myOrders.filter((o) => o.status === "paid");
@@ -1174,7 +1254,7 @@
           <div>
             <h1 style=${{ fontSize: "1.45rem" }}>${t.clientWelcome} — ${session.name}</h1>
             <div style=${{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-              ${session.mobile} · ${t.clientNotice}
+              ${session.mobile}${linkedOwner ? ` · ${t.linkedChakkiLabel}: ${linkedOwner.millName || linkedOwner.name} (${linkedOwner.referralCode})` : ""} · ${t.clientNotice}
             </div>
           </div>
         </div>
@@ -1238,8 +1318,33 @@
     const D = window.CHAKKI_DATA;
     const [prefs, setPrefs] = useState(() => D.loadPrefs());
     const [store, setStore] = useState(() => D.loadStore());
-    const [session, setSession] = useState(() => D.loadSession());
-    const [view, setView] = useState(() => (D.loadSession() ? "dashboard" : "home"));
+    const [session, setSession] = useState(() => {
+      const saved = D.loadSession();
+      const loadedStore = D.loadStore();
+      if (!saved) return null;
+      if (saved.role === "owner") {
+        const ownerMatch = loadedStore.owners.find((o) => o.id === saved.userId);
+        if (!ownerMatch) {
+          D.saveSession(null);
+          return null;
+        }
+        const synced = { ...saved, referralCode: ownerMatch.referralCode || saved.referralCode || "" };
+        D.saveSession(synced);
+        return synced;
+      }
+      if (saved.role === "client") {
+        const clientMatch = loadedStore.clients.find((c) => c.id === saved.userId);
+        if (!clientMatch) {
+          D.saveSession(null);
+          return null;
+        }
+        const synced = { ...saved, ownerId: clientMatch.ownerId || saved.ownerId || "" };
+        D.saveSession(synced);
+        return synced;
+      }
+      return null;
+    });
+    const [view, setView] = useState(() => (session ? "dashboard" : "home"));
     const [authRole, setAuthRole] = useState("owner");
     const [authTab, setAuthTab] = useState("register");
     const [toastMsg, setToastMsg] = useState("");
@@ -1289,15 +1394,23 @@
     };
 
     const handleRegisterOwner = ({ name, millName, mobile, pin }) => {
-      const ownerObj = { id: uid("owner"), name, millName, mobile, pin, createdAt: todayISO() };
+      const referralCode = D.generateReferralCode(store.owners);
+      const ownerObj = { id: uid("owner"), name, millName, mobile, pin, referralCode, createdAt: todayISO() };
       updateStore((prev) => ({ ...prev, owners: [...prev.owners, ownerObj] }));
-      handleLoginSuccess({ role: "owner", userId: ownerObj.id, name: ownerObj.name, millName: ownerObj.millName });
+      handleLoginSuccess({
+        role: "owner",
+        userId: ownerObj.id,
+        name: ownerObj.name,
+        millName: ownerObj.millName,
+        referralCode: ownerObj.referralCode
+      });
     };
 
-    const handleRegisterClient = ({ name, mobile, address, pin }) => {
-      const clientObj = { id: uid("c"), name, mobile, address, pin, createdAt: todayISO() };
+    const handleRegisterClient = ({ name, mobile, address, pin, ownerId }) => {
+      const clientObj = { id: uid("c"), ownerId, name, mobile, address, pin, createdAt: todayISO() };
       const notifObj = {
         id: uid("n"),
+        ownerId,
         type: "client_registered",
         clientId: clientObj.id,
         clientName: clientObj.name,
@@ -1310,7 +1423,13 @@
         clients: [...prev.clients, clientObj],
         notifications: [notifObj, ...prev.notifications]
       }));
-      handleLoginSuccess({ role: "client", userId: clientObj.id, name: clientObj.name, mobile: clientObj.mobile });
+      handleLoginSuccess({
+        role: "client",
+        userId: clientObj.id,
+        name: clientObj.name,
+        mobile: clientObj.mobile,
+        ownerId: clientObj.ownerId
+      });
       showToast(t.regSuccessClient);
     };
 
@@ -1318,7 +1437,7 @@
       if (store.clients.some((c) => c.mobile === mobile)) {
         return { ok: false, error: t.errAlreadyRegistered };
       }
-      const clientObj = { id: uid("c"), name, mobile, address, pin, createdAt: todayISO() };
+      const clientObj = { id: uid("c"), ownerId: session.userId, name, mobile, address, pin, createdAt: todayISO() };
       updateStore((prev) => ({ ...prev, clients: [...prev.clients, clientObj] }));
       return { ok: true, client: clientObj };
     };
@@ -1327,6 +1446,7 @@
       const total = Number((kg * ratePerKg).toFixed(2));
       const newOrder = {
         id: uid("o"),
+        ownerId: session.userId,
         clientId,
         grainId,
         kg,
@@ -1367,7 +1487,9 @@
     const handleMarkAllNotifsRead = () => {
       updateStore((prev) => ({
         ...prev,
-        notifications: prev.notifications.map((n) => ({ ...n, read: true }))
+        notifications: prev.notifications.map((n) =>
+          n.ownerId === session?.userId ? { ...n, read: true } : n
+        )
       }));
     };
 
@@ -1384,7 +1506,7 @@
             <div className="navbar-inner">
               <button type="button" className="brand-btn" onClick=${() => setView("home")}>
                 <div className="brand-mark">
-                  <img src="assets/grains/gehu.jpg" alt=${displayMillTitle} />
+                  <img src="assets/logo.png" alt=${displayMillTitle} />
                 </div>
                 <div>
                   <div className="brand-title">${displayMillTitle}</div>

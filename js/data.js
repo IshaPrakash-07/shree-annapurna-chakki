@@ -33,6 +33,17 @@
     };
   }
 
+  function generateReferralCode(existingOwners) {
+    const used = new Set((existingOwners || []).map((o) => String(o.referralCode || "").toUpperCase()));
+    let code = "";
+    for (let i = 0; i < 50; i++) {
+      const num = Math.floor(1000 + Math.random() * 9000);
+      code = `SAC-${num}`;
+      if (!used.has(code)) return code;
+    }
+    return `SAC-${Date.now().toString().slice(-4)}`;
+  }
+
   function safeParse(json, fallback) {
     try {
       return json ? JSON.parse(json) : fallback;
@@ -54,12 +65,43 @@
       localStorage.setItem(STORE_KEY, JSON.stringify(initial));
       return initial;
     }
-    return {
-      owners: Array.isArray(parsed.owners) ? parsed.owners : [],
-      clients: parsed.clients,
-      orders: parsed.orders,
-      notifications: Array.isArray(parsed.notifications) ? parsed.notifications : []
-    };
+
+    let migrated = false;
+    const owners = (Array.isArray(parsed.owners) ? parsed.owners : []).map((o) => {
+      if (o.referralCode) return o;
+      migrated = true;
+      return { ...o, referralCode: generateReferralCode(parsed.owners) };
+    });
+
+    const fallbackOwnerId = owners[0]?.id || "";
+    const clients = parsed.clients.map((c) => {
+      if (c.ownerId || !fallbackOwnerId) return c;
+      migrated = true;
+      return { ...c, ownerId: fallbackOwnerId };
+    });
+
+    const clientOwnerMap = {};
+    clients.forEach((c) => { clientOwnerMap[c.id] = c.ownerId; });
+
+    const orders = parsed.orders.map((o) => {
+      if (o.ownerId) return o;
+      const inferredOwner = clientOwnerMap[o.clientId] || fallbackOwnerId;
+      if (!inferredOwner) return o;
+      migrated = true;
+      return { ...o, ownerId: inferredOwner };
+    });
+
+    const notifications = (Array.isArray(parsed.notifications) ? parsed.notifications : []).map((n) => {
+      if (n.ownerId) return n;
+      const inferredOwner = clientOwnerMap[n.clientId] || fallbackOwnerId;
+      if (!inferredOwner) return n;
+      migrated = true;
+      return { ...n, ownerId: inferredOwner };
+    });
+
+    const store = { owners, clients, orders, notifications };
+    if (migrated) saveStore(store);
+    return store;
   }
 
   function saveStore(store) {
@@ -87,6 +129,7 @@
     GRAINS,
     todayISO: () => isoDateOffset(0),
     isoDateOffset,
+    generateReferralCode,
     loadStore,
     saveStore,
     loadPrefs,

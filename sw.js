@@ -1,9 +1,10 @@
-const CACHE_NAME = "chakki-owner-v2";
+const CACHE_NAME = "chakki-owner-v5";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./manifest.json",
+  "./assets/logo.png",
   "./js/i18n.js",
   "./js/data.js",
   "./js/app.js",

@@ -1,18 +1,26 @@
 {
+  "id": "./",
   "name": "Shree Annapurna Chakki",
   "short_name": "Shree Annapurna Chakki",
-  "description": "Simple multilingual ledger, voice assistant, and grain revenue tracker for Indian flour mill owners and clients.",
+  "description": "Simple multilingual ledger and grain revenue tracker for Indian flour mill owners and clients.",
   "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#FFFBF3",
   "theme_color": "#E57F2E",
   "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "assets/grains/gehu.jpg",
-      "sizes": "512x512",
-      "type": "image/jpeg",
+      "src": "assets/logo.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "assets/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }
